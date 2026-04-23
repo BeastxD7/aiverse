@@ -1,0 +1,109 @@
+project:
+  name: HR Intent Classifier
+  domain_brief: |
+    An HR SaaS product where HR-side professionals chat with an AI assistant to
+    manage job descriptions (JDs), candidate pipelines, and interview scheduling.
+    The product is used ONLY by people on the employer side — HR managers,
+    startup founders hiring their first employees, agency recruiters, and CHROs.
+    Candidates, applicants, and job-seekers never use this product and never
+    send messages into it. All messages come from someone who OWNS or MANAGES
+    job postings and is acting on behalf of the company.
+    Messages are typed in a chat-like interface — short, often casual,
+    occasionally urgent, sometimes formal.
+  speakers:
+    in_scope:
+      - HR manager at a mid-size or enterprise company managing multiple open roles
+      - Startup founder hiring their first few employees, acting as de-facto HR
+      - Agency recruiter placing candidates for client companies (talks about "our client's JD")
+      - CHRO or VP of People setting hiring strategy across an organization
+      - HR coordinator or assistant handling routine JD updates on behalf of a hiring manager
+    out_of_scope:
+      - Candidates or applicants asking about roles, applying for jobs, or inquiring about qualifications
+      - Job seekers asking the system to modify their resume, CV, or cover letter
+      - Employees asking about their own role or internal HR policy (benefits, PTO, etc.)
+      - Anyone outside the hiring-manager/HR organization
+
+dataset:
+  brief: |
+    Training data for an intent classifier that routes HR-user messages to backend
+    actions on job descriptions. We want variety of phrasing, tone, and persona
+    (within the in-scope speakers) so the classifier generalizes beyond the seeds.
+    Include direct commands and indirect requests.
+  target_count: 100
+  diversity: high
+  persona_pool_size: 40
+
+schema:
+  fields:
+    - name: text
+      type: string
+      description: The raw user message as typed in the HR chat interface. First person; one-off chat turn (not multi-turn).
+    - name: label
+      type: enum
+      description: The HR user's intent — what action they want the system to take against a job description
+      values:
+        - name: create_jd
+          description: HR wants to draft a BRAND NEW job description from scratch. Used when no JD exists yet for this role and the user is starting fresh.
+        - name: refine_jd
+          description: HR wants to modify, edit, update, or improve an EXISTING job description. Used for any content change — tone, requirements, responsibilities, formatting — where the JD already exists.
+        - name: delete_jd
+          description: HR wants to PERMANENTLY remove a job description (archive/destroy). Used when the role is cancelled or the JD should no longer exist anywhere.
+        - name: hide_jd
+          description: HR wants to TEMPORARILY unpublish a JD (keep it stored, but hide from candidates/public view). Used when the role is paused, filled, or on hold but may come back.
+    - name: confidence
+      type: float
+      min: 0.7
+      max: 1.0
+      description: Self-reported labeling confidence — 0.7 is uncertain, 1.0 is perfectly clear
+    - name: source
+      type: enum
+      description: Where this training example came from
+      values:
+        - name: synthetic
+          description: Always this value — marks LLM-generated data (not real user utterances)
+
+seeds:
+  - text: "Hey can you draft a JD for a senior backend engineer at our startup?"
+    label: create_jd
+    confidence: 0.95
+    source: synthetic
+  - text: "Please remove the posting for the marketing role — we cancelled that hire."
+    label: delete_jd
+    confidence: 0.92
+    source: synthetic
+  - text: "Tweak the product manager JD to emphasize remote-friendly."
+    label: refine_jd
+    confidence: 0.9
+    source: synthetic
+  - text: "Let's pause the DevOps posting for now — we'll revisit in Q3."
+    label: hide_jd
+    confidence: 0.93
+    source: synthetic
+
+anti_seeds:
+  - text: "Hi, I'd like to apply for the senior engineer role I saw on your careers page."
+    reason: Candidate voice — candidates never use this product, only HR does.
+  - text: "Can you update my resume to emphasize machine learning over data science?"
+    reason: Candidate modifying their own resume — out of scope; this product acts on JDs, not resumes.
+  - text: "What's the salary range for the open PM role?"
+    reason: Candidate asking about compensation — HR owns the JD, doesn't query it like an outsider.
+  - text: "I think I'd be a great fit for the data analyst position."
+    reason: Candidate pitching themselves — entirely out of scope.
+
+provider:
+  type: bedrock
+  # model / region / credentials come from .env — see AWS_MODEL_ID, AWS_REGION,
+  # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY. You can override model here if you
+  # want this config to pin a specific model regardless of env.
+  concurrency: 8            # Bedrock parallelizes natively
+  timeout_seconds: 120
+
+dedup:
+  threshold: 0.85
+
+judge:
+  enabled: true             # judge on — Bedrock is fast and cheap enough
+
+logic_filter:
+  enabled: true             # back on — Bedrock handles reasoning batches fine
+  batch_size: 25

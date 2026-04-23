@@ -1,0 +1,135 @@
+project:
+  name: Human Emotion Detector
+  domain_brief: |
+    A text classification system that detects the primary emotion expressed in
+    short human-written messages. Messages come from everyday contexts: social
+    media posts, personal chat messages, customer service transcripts, product
+    reviews, and forum posts. The writer is always a human expressing or
+    describing their current emotional state or a recent experience.
+    Messages are typically 1-3 sentences, conversational in tone, and written
+    in the first person — though some are more indirect or restrained.
+  speakers:
+    in_scope:
+      - Person venting frustration or dissatisfaction about a situation or product
+      - Person sharing a joyful or positive experience (achievement, surprise, gratitude)
+      - Person expressing sadness, grief, disappointment, or loneliness
+      - Person writing a neutral or factual message with no clear emotional charge
+    out_of_scope:
+      - Automated bots or system-generated messages
+      - Formal business communications with no personal emotional content
+      - Song lyrics, poetry, or fictional narrative (not real personal expression)
+
+dataset:
+  brief: |
+    Training data for a 4-class emotion classifier. We need variety across
+    emotional intensity (mild to strong), writing style (casual to formal),
+    context (personal, professional, social media), and speaker demographics.
+    Include subtle and ambiguous cases — not every sad message says "I'm sad"
+    and not every angry message uses strong language. The out_of_scope class
+    captures messages that contain no clear sad/happy/angry signal: neutral
+    questions, informational statements, or mixed emotions that don't resolve
+    to one label.
+  target_count: 40
+  diversity: high
+  persona_pool_size: 30
+
+schema:
+  fields:
+    - name: text
+      type: string
+      description: >
+        A short human-written message (1-4 sentences) expressing or describing
+        an emotion. First-person. Conversational. No quotes around the message.
+
+    - name: label
+      type: enum
+      description: The primary emotion expressed in the text
+      values:
+        - name: happy
+          description: >
+            Message expresses joy, excitement, relief, gratitude, pride, or
+            contentment. The overall tone is clearly positive. Includes subtle
+            cases like quiet satisfaction or pleasant surprise — not just
+            exclamation-mark excitement.
+        - name: sad
+          description: >
+            Message expresses sadness, grief, disappointment, loneliness,
+            regret, or despair. Covers both direct ("I'm devastated") and
+            indirect expressions ("I just don't see the point anymore").
+            Missing someone, losing something important, or feeling let down
+            all count.
+        - name: angry
+          description: >
+            Message expresses anger, frustration, irritation, resentment, or
+            outrage. Ranges from mild annoyance ("this is so frustrating") to
+            strong rage. Complaints about a specific injustice or betrayal
+            also fall here when the dominant tone is anger rather than sadness.
+        - name: out_of_scope
+          description: >
+            Message has no clear dominant emotion from the three above.
+            Examples: neutral factual statements, questions with no emotional
+            charge, mixed emotions that cancel out, ambiguous statements that
+            could plausibly be any label. Use this when a human labeler would
+            genuinely disagree on which of the three emotions applies.
+
+    - name: confidence
+      type: float
+      min: 0.7
+      max: 1.0
+      description: >
+        Labeling confidence. 1.0 = unmistakably clear label. 0.7 = genuine
+        ambiguity — a reasonable person might pick a different label.
+
+    - name: source
+      type: enum
+      description: Origin of this training example
+      values:
+        - name: synthetic
+          description: LLM-generated example (always this value)
+
+seeds:
+  - text: "Just got the promotion I've been working toward for two years. Still in shock honestly."
+    label: happy
+    confidence: 0.95
+    source: synthetic
+
+  - text: "My dog passed away last night. The house feels so empty without him."
+    label: sad
+    confidence: 0.97
+    source: synthetic
+
+  - text: "They promised to fix the billing error weeks ago and it's STILL showing up on my account. Completely unacceptable."
+    label: angry
+    confidence: 0.93
+    source: synthetic
+
+  - text: "Anyone know if the downtown branch is open on Sundays?"
+    label: out_of_scope
+    confidence: 0.91
+    source: synthetic
+
+anti_seeds:
+  - text: "I feel happy and sad at the same time about leaving."
+    reason: Explicitly mixed emotions — no single dominant label, cannot be reliably classified.
+  - text: "The product ships in 3-5 business days."
+    reason: Automated / system message with no human emotional content.
+  - text: "Her eyes glistened with unshed tears as she watched him walk away."
+    reason: Fictional narrative prose, not a real personal expression from a human speaker.
+
+provider:
+  type: bedrock
+  concurrency: 8
+  timeout_seconds: 120
+
+dedup:
+  threshold: 0.82
+
+judge:
+  enabled: true
+  min_correctness: 7
+  min_realism: 7
+  min_distinctiveness: 6
+
+logic_filter:
+  enabled: true
+  batch_size: 25
