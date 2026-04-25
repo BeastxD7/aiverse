@@ -45,6 +45,22 @@ JSON only."""
 _GEN_SYSTEM = """You generate ONE realistic training example for an NLP dataset.
 Output strict JSON matching the requested schema. No prose, no explanation."""
 
+_DIVERSITY_DIRECTIVES = {
+    "standard": "",
+    "high": (
+        "DIVERSITY DIRECTIVE: Generate an UNUSUAL, VARIED example. "
+        "Avoid the most obvious or generic expression. "
+        "Vary sentence length, vocabulary, cultural context, or phrasing. "
+        "Make this example as distinct as possible from a typical training sample.\n\n"
+    ),
+    "edge_cases": (
+        "DIVERSITY DIRECTIVE: Generate an EDGE CASE or AMBIGUOUS example — "
+        "something subtle, borderline, or easily mislabeled. "
+        "The correct classification should require careful reading. "
+        "Avoid clear-cut, obvious examples.\n\n"
+    ),
+}
+
 _GEN_USER_TEMPLATE = """Generate ONE example matching this schema:
 
 {schema_hint}
@@ -54,7 +70,7 @@ CONTEXT FOR THIS SPECIFIC EXAMPLE:
 - Speaker persona: {persona}
 - Unique seed: {seed}
 
-{speaker_block}{seed_block}{anti_seed_block}HARD RULES:
+{speaker_block}{seed_block}{anti_seed_block}{diversity_block}HARD RULES:
 {rule_lines}
 
 Return JSON only — a single object matching the schema above."""
@@ -108,6 +124,7 @@ def compose_prompt(
     personas: list[str],
     speaker_block: str,
     rng: random.Random,
+    diversity: str = "standard",
 ) -> tuple[str, str]:
     """Return (system, user) for a single generation call."""
     combo_lines = "\n".join(f"- {k}: {v}" for k, v in combination.items())
@@ -135,6 +152,7 @@ def compose_prompt(
         speaker_pre = speaker_block + "\n\n"
 
     rule_lines = _build_rules(schema, combination)
+    diversity_block = _DIVERSITY_DIRECTIVES.get(diversity, "")
     user = _GEN_USER_TEMPLATE.format(
         schema_hint=json.dumps(schema.json_example(), indent=2),
         combo_lines=combo_lines,
@@ -143,6 +161,7 @@ def compose_prompt(
         speaker_block=speaker_pre,
         seed_block=seed_block,
         anti_seed_block=anti_seed_block,
+        diversity_block=diversity_block,
         rule_lines=rule_lines,
     )
     return _GEN_SYSTEM, user
@@ -172,6 +191,12 @@ def _build_rules(schema: DatasetSchema, combination: Combination) -> str:
                     rules.append(f'    * "{ev.name}"')
         elif f.type == "float" and (f.min is not None or f.max is not None):
             rules.append(f'- "{f.name}" must be between {f.min} and {f.max}')
+        elif f.type == "object":
+            desc = f" — {f.description}" if f.description else ""
+            rules.append(f'- "{f.name}" must be an object{desc} matching the structure shown above')
+        elif f.type == "array":
+            desc = f" — {f.description}" if f.description else ""
+            rules.append(f'- "{f.name}" must be an array{desc} of items matching the structure shown above')
     if not rules:
         rules.append("- all fields must match the schema types above")
     return "\n".join(rules)

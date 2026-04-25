@@ -89,7 +89,8 @@ async def discover_axes(
         schema_hint=_rich_schema_hint(cfg),
     )
     t0 = time.monotonic()
-    resp = await provider.generate_json(_SYSTEM, user, max_retries=3)
+    # Low temperature for consistency — axes should be stable across runs for the same domain.
+    resp = await provider.generate_json(_SYSTEM, user, max_retries=3, temperature=0.3)
     elapsed = time.monotonic() - t0
 
     if resp.outcome != "success" or not isinstance(resp.parsed, dict):

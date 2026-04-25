@@ -34,6 +34,7 @@ class GenStats:
 
 
 ProgressCb = Callable[[dict], Awaitable[None] | None]
+SampleCb = Callable[[dict], Awaitable[None] | None]
 
 
 async def generate_all(
@@ -44,6 +45,7 @@ async def generate_all(
     personas: list[str],
     provider: LLMProvider,
     on_progress: ProgressCb | None = None,
+    on_sample: SampleCb | None = None,
     debug: DebugWriter | None = None,
 ) -> GenStats:
     stats = GenStats()
@@ -71,6 +73,7 @@ async def generate_all(
                 personas=personas,
                 speaker_block=speaker_block,
                 rng=rng,
+                diversity=cfg.dataset.diversity,
             )
             stats.attempted += 1
             t0 = time.monotonic()
@@ -137,6 +140,10 @@ async def generate_all(
             row.produced += 1
             stats.succeeded += 1
             sample_counter[0] += 1
+            if on_sample:
+                res = on_sample(resp.parsed)
+                if asyncio.iscoroutine(res):
+                    await res
             if debug:
                 sample_logs.append(_gen_entry(combo_label, user, resp, elapsed, "PASS", retry_note, None, resp.parsed, sample_counter[0]))
             await _emit(

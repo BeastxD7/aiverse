@@ -19,9 +19,43 @@ def _tokens(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
 
 
+def _resolve_path(row: dict, path: str) -> list[str]:
+    """Resolve a dotted/array path to all matching string leaf values.
+
+    Supports simple keys ("text"), dotted nesting ("metadata.source"),
+    and array expansion ("spans[].text").
+    """
+    parts = path.replace("[]", "[*]").split(".")
+    current: list = [row]
+    for part in parts:
+        if part.endswith("[*]"):
+            key = part[:-3]
+            next_level: list = []
+            for node in current:
+                if isinstance(node, dict):
+                    val = node.get(key, [])
+                    if isinstance(val, list):
+                        next_level.extend(val)
+            current = next_level
+        else:
+            next_level = []
+            for node in current:
+                if isinstance(node, dict) and part in node:
+                    next_level.append(node[part])
+            current = next_level
+    return [str(v) for v in current if isinstance(v, str)]
+
+
 def _primary_text(row: dict, text_fields: list[str]) -> str:
     """Concatenate the primary text fields for signature computation."""
-    parts = [str(row.get(f, "")) for f in text_fields]
+    parts: list[str] = []
+    for f in text_fields:
+        if "." in f or "[]" in f:
+            parts.extend(_resolve_path(row, f))
+        else:
+            val = row.get(f, "")
+            if val:
+                parts.append(str(val))
     return " ".join(p for p in parts if p)
 
 
@@ -87,8 +121,9 @@ def pick_text_fields(schema) -> list[str]:
     """Use string fields for dedup; fall back to all fields if none.
 
     Skips enum fields since they collapse variety artificially.
+    Walks nested object/array fields to find string leaves.
     """
-    strings = [f.name for f in schema.fields if f.type == "string"]
+    strings = schema.string_field_paths()
     if strings:
         return strings
     return [f.name for f in schema.fields]

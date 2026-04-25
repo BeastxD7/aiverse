@@ -45,6 +45,10 @@ class DatasetConfig(BaseModel):
     target_count: int = Field(ge=1, le=100_000)
     diversity: Literal["standard", "high", "edge_cases"] = "standard"
     persona_pool_size: int = Field(default=40, ge=5, le=200)
+    axes: dict[str, list[str]] | None = Field(default=None)
+    require_balanced: bool = False
+    min_text_chars: int = Field(default=10, ge=1)
+    max_text_chars: int = Field(default=2000, ge=10)
 
 
 class ProviderConfig(BaseModel):
@@ -73,6 +77,7 @@ class JudgeConfig(BaseModel):
     min_correctness: int = 7
     min_realism: int = 7
     min_distinctiveness: int = 7
+    concurrency: int = Field(default=8, ge=1, le=50)
 
 
 class LogicFilterConfig(BaseModel):
@@ -88,6 +93,7 @@ class AntiSeed(BaseModel):
 
 
 class JobConfig(BaseModel):
+    version: str = "1"
     project: ProjectConfig
     dataset: DatasetConfig
     dataset_schema: DatasetSchema = Field(alias="schema")

@@ -60,6 +60,7 @@ class OllamaProvider:
         user: str,
         *,
         max_retries: int = 3,
+        temperature: float = 0.8,
     ) -> LLMResponse:
         last_err: str | None = None
         raw = ""
@@ -75,7 +76,7 @@ class OllamaProvider:
                         format="json",
                         keep_alive=self.keep_alive,
                         options={
-                            "temperature": 0.8,
+                            "temperature": temperature,
                             "num_predict": self.max_output_tokens,
                         },
                     ),
@@ -125,6 +126,7 @@ class OllamaProvider:
         user: str,
         *,
         max_retries: int = 3,
+        temperature: float = 0.8,
     ) -> LLMResponse:
         last_err: str | None = None
         raw = ""
@@ -139,7 +141,7 @@ class OllamaProvider:
                         ],
                         keep_alive=self.keep_alive,
                         options={
-                            "temperature": 0.7,
+                            "temperature": temperature,
                             "num_predict": self.max_output_tokens,
                         },
                     ),

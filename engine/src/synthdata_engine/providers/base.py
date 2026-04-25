@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 
-Outcome = Literal["success", "invalid_json", "refusal", "timeout", "error"]
+Outcome = Literal["success", "invalid_json", "refusal", "timeout", "throttled", "error"]
 
 
 @dataclass
@@ -27,6 +27,7 @@ class LLMProvider(Protocol):
         user: str,
         *,
         max_retries: int = 3,
+        temperature: float = 0.8,
     ) -> LLMResponse: ...
 
     async def generate_text(
@@ -35,4 +36,5 @@ class LLMProvider(Protocol):
         user: str,
         *,
         max_retries: int = 3,
+        temperature: float = 0.8,
     ) -> LLMResponse: ...

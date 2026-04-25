@@ -15,10 +15,19 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 from dataclasses import dataclass
 
 from .base import LLMResponse
 from .ollama import _looks_like_refusal, _repair_json  # reuse JSON + refusal logic
+
+_THROTTLE_CODES = frozenset({
+    "ThrottlingException",
+    "TooManyRequestsException",
+    "RequestLimitExceeded",
+    "ServiceUnavailableException",
+    "ModelNotReadyException",
+})
 
 
 @dataclass
@@ -97,19 +106,20 @@ class BedrockProvider:
         user: str,
         *,
         max_retries: int = 3,
+        temperature: float = 0.8,
     ) -> LLMResponse:
         last_err: str | None = None
         raw = ""
         for attempt in range(1, max_retries + 1):
             try:
-                raw = await self._converse(system=system, user=user, format_json=True)
+                raw = await self._converse(system=system, user=user, format_json=True, temperature=temperature)
             except asyncio.TimeoutError as e:
                 last_err = f"timeout after {self.timeout}s ({type(e).__name__})"
                 await _backoff(attempt)
                 continue
             except Exception as e:  # noqa: BLE001
-                last_err = f"{type(e).__name__}: {e}"
-                await _backoff(attempt)
+                last_err, is_throttle = _classify_error(e)
+                await (_throttle_backoff(attempt) if is_throttle else _backoff(attempt))
                 continue
 
             if _looks_like_refusal(raw):
@@ -134,6 +144,8 @@ class BedrockProvider:
 
         if last_err and "timeout" in last_err:
             outcome = "timeout"
+        elif last_err and "throttl" in last_err.lower():
+            outcome = "throttled"
         elif last_err == "unparseable JSON":
             outcome = "invalid_json"
         else:
@@ -152,21 +164,27 @@ class BedrockProvider:
         user: str,
         *,
         max_retries: int = 3,
+        temperature: float = 0.8,
     ) -> LLMResponse:
         last_err: str | None = None
         raw = ""
         for attempt in range(1, max_retries + 1):
             try:
-                raw = await self._converse(system=system, user=user, format_json=False)
+                raw = await self._converse(system=system, user=user, format_json=False, temperature=temperature)
                 return LLMResponse(outcome="success", raw_text=raw, parsed=None, attempts=attempt)
             except asyncio.TimeoutError as e:
                 last_err = f"timeout after {self.timeout}s ({type(e).__name__})"
                 await _backoff(attempt)
             except Exception as e:  # noqa: BLE001
-                last_err = f"{type(e).__name__}: {e}"
-                await _backoff(attempt)
+                last_err, is_throttle = _classify_error(e)
+                await (_throttle_backoff(attempt) if is_throttle else _backoff(attempt))
 
-        outcome = "timeout" if last_err and "timeout" in last_err else "error"
+        if last_err and "timeout" in last_err:
+            outcome = "timeout"
+        elif last_err and "throttl" in last_err.lower():
+            outcome = "throttled"
+        else:
+            outcome = "error"
         return LLMResponse(
             outcome=outcome,
             raw_text=raw,
@@ -184,6 +202,7 @@ class BedrockProvider:
         user: str,
         format_json: bool,
         max_tokens: int | None = None,
+        temperature: float = 0.8,
     ) -> str:
         """Run a single converse call in a thread (boto3 is sync)."""
         max_tok = max_tokens or self.max_output_tokens
@@ -199,7 +218,7 @@ class BedrockProvider:
                 messages=[{"role": "user", "content": [{"text": user_content}]}],
                 inferenceConfig={
                     "maxTokens": max_tok,
-                    "temperature": 0.8,
+                    "temperature": temperature,
                 },
             )
             blocks = resp.get("output", {}).get("message", {}).get("content", [])
@@ -209,5 +228,26 @@ class BedrockProvider:
         return await asyncio.wait_for(asyncio.to_thread(_call), timeout=self.timeout)
 
 
+def _classify_error(exc: Exception) -> tuple[str, bool]:
+    """Return (error_message, is_throttle). Inspects botocore ClientError codes."""
+    try:
+        import botocore.exceptions
+        if isinstance(exc, botocore.exceptions.ClientError):
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code in _THROTTLE_CODES:
+                return f"throttled ({code})", True
+            return f"ClientError ({code}): {exc}", False
+    except ImportError:
+        pass
+    return f"{type(exc).__name__}: {exc}", False
+
+
 async def _backoff(attempt: int) -> None:
     await asyncio.sleep(min(2 ** (attempt - 1), 8))
+
+
+async def _throttle_backoff(attempt: int) -> None:
+    """Longer backoff with jitter for rate-limit errors — gives AWS time to recover."""
+    base = min(30 * attempt, 120)
+    jitter = random.uniform(0, base * 0.25)
+    await asyncio.sleep(base + jitter)

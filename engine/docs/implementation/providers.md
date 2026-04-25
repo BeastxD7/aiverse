@@ -2,17 +2,22 @@
 
 ## Overview
 
-Providers implement the `LLMProvider` base interface with two methods:
-- `generate_json(prompt, max_output_tokens) -> dict | list` — for structured output
-- `generate_text(prompt, max_output_tokens) -> str` — for free-text output
+Providers implement the `LLMProvider` protocol from `providers/base.py` with two async methods:
 
-Both methods include a hard timeout (`asyncio.wait_for`) and JSON repair for `generate_json`.
+```python
+async def generate_json(self, system, user, *, max_retries=3, temperature=0.8) -> LLMResponse
+async def generate_text(self, system, user, *, max_retries=3, temperature=0.8) -> LLMResponse
+```
+
+`LLMResponse` carries `outcome` (`"success"` | `"error"` | `"refusal"` | `"throttled"`), `raw_text`, `parsed`, `error`, and `attempts`.
+
+The `temperature` parameter is passed through to the model on every call. Axis discovery uses `temperature=0.3` for consistency; generation and judging use `0.8`.
 
 ---
 
 ## Ollama
 
-**File:** `engine/src/synthdata_engine/providers/ollama.py`
+**File:** `src/synthdata_engine/providers/ollama.py`
 
 **Setup:**
 1. Install Ollama from [ollama.ai](https://ollama.ai)
@@ -31,7 +36,7 @@ Both methods include a hard timeout (`asyncio.wait_for`) and JSON repair for `ge
 
 ## AWS Bedrock
 
-**File:** `engine/src/synthdata_engine/providers/bedrock.py`
+**File:** `src/synthdata_engine/providers/bedrock.py`
 
 **Setup:**
 1. Create an AWS account with Bedrock access enabled
@@ -51,9 +56,22 @@ AWS_MODEL_ID=google.gemma-3-27b-it-qat-q8-0:2:2
 - `asyncio.to_thread` wraps the synchronous boto3 call so it doesn't block the event loop
 - `asyncio.wait_for` provides a hard timeout around the thread call
 - JSON reinforcement suffix appended to every user prompt since Bedrock has no native JSON mode on all models
-- Reuses `_repair_json()` and `_looks_like_refusal()` from the Ollama provider
 
-**Performance:** ~5–15s per call on gemma-3-27b-it. Full pipeline at target=10: ~50s (26× faster than local Ollama).
+**Throttle handling:**
+
+The provider detects AWS rate-limit errors and applies exponential backoff automatically — no config required.
+
+Detected error codes:
+```
+ThrottlingException, TooManyRequestsException, RequestLimitExceeded,
+ServiceUnavailableException, ModelNotReadyException
+```
+
+Backoff formula: `base = min(30 × attempt, 120)s` + `jitter = uniform(0, base × 0.25)`. Non-throttle errors (auth failure, model not found) are surfaced immediately without retrying.
+
+At sustained 100K+ scale on Bedrock, expect throttling from AWS after ~30 minutes of continuous load. The backoff handles this automatically — runs slow down but never fail.
+
+**Performance:** ~3–15s per call on gemma-3-27b-it. Full pipeline at target=10: ~50s (26× faster than local Ollama).
 
 **Recommended models (us-east-1):**
 | Model ID | Notes |
@@ -62,11 +80,22 @@ AWS_MODEL_ID=google.gemma-3-27b-it-qat-q8-0:2:2
 | `us.amazon.nova-pro-v1:0` | Amazon's flagship — strong reasoning |
 | `anthropic.claude-3-5-haiku-20241022-v1:0` | Fast + accurate, higher cost |
 
+**Judge model override:**
+
+Set `provider.judge_model` to use a stronger model for the quality judge while keeping a faster/cheaper model for generation:
+
+```yaml
+provider:
+  type: bedrock
+  model: google.gemma-3-27b-it-qat-q8-0:2:2         # generation
+  judge_model: anthropic.claude-3-5-haiku-20241022-v1:0  # judge
+```
+
 ---
 
 ## Adding a new provider
 
-1. Create `engine/src/synthdata_engine/providers/myprovider.py`
-2. Implement `LLMProvider` interface from `providers/base.py`
-3. Add `type: myprovider` to `ProviderConfig.type` literal in `config.py`
-4. Add dispatch case in `pipeline._build_provider()` and `pipeline._build_judge_provider()`
+1. Create `src/synthdata_engine/providers/myprovider.py`
+2. Implement the `LLMProvider` protocol from `providers/base.py` — both `generate_json` and `generate_text` with the `temperature` kwarg
+3. Add `"myprovider"` to the `ProviderConfig.type` literal in `config.py`
+4. Add dispatch cases in `pipeline._build_provider()` and `pipeline._build_judge_provider()`

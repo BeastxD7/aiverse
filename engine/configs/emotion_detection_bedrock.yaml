@@ -32,6 +32,7 @@ dataset:
   target_count: 40
   diversity: high
   persona_pool_size: 30
+  require_balanced: true
 
 schema:
   fields:
