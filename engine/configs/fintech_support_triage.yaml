@@ -1,0 +1,180 @@
+project:
+  name: FinTech Support Ticket Triage
+  domain_brief: |
+    An AI-powered triage system for customer support tickets submitted to a
+    fintech company offering mobile payments, digital wallets, and business
+    banking services. Tickets arrive via web portal, mobile app, and email.
+    Writers are retail customers and small business owners who have a problem
+    or question about their account, a transaction, or the product itself.
+    Messages range from brief ("my payment failed") to detailed multi-paragraph
+    complaints. Tone varies from calm and matter-of-fact to frustrated and urgent.
+    Many real tickets sit on the boundary between categories — a payment that
+    failed due to an app crash touches both payment_dispute and product_bug;
+    a locked account after a suspicious login touches both account_security
+    and payment_dispute.
+  speakers:
+    in_scope:
+      - Retail customer reporting a failed, reversed, or disputed transaction
+      - Business owner with a billing or invoicing question about fees
+      - Customer locked out of their account or reporting suspected fraud
+      - User reporting an app crash, error message, or feature not working
+      - Customer with a general how-to question or feedback
+    out_of_scope:
+      - Internal employees or support agents writing to each other
+      - Automated system notifications or error logs
+      - Sales inquiries from prospective customers who don't yet have an account
+
+dataset:
+  brief: |
+    Training data for a 5-class support ticket classifier that routes incoming
+    tickets to the correct team. Classes must be distinguishable but genuine
+    boundary cases are expected and valuable — include them in proportion.
+    Realistic frustration, urgency markers, incomplete information, and varied
+    writing quality are all expected. Do not make every ticket textbook-clear;
+    ambiguous real-world language is the whole point.
+  target_count: 50
+  require_balanced: true
+  diversity: high
+
+schema:
+  fields:
+    - name: text
+      type: string
+      description: >
+        The raw customer support ticket text (1-4 sentences). Written in first
+        person, informal tone. May include transaction amounts, partial dates,
+        or vague references. No real PII.
+
+    - name: label
+      type: enum
+      description: Primary routing category for this ticket
+      values:
+        - name: payment_dispute
+          description: >
+            Customer reports a transaction that failed, was charged incorrectly,
+            a refund not received, or money sent to the wrong recipient.
+            The core issue is money movement that did not go as expected.
+            Includes double charges, pending transactions that never cleared,
+            and disputed merchant charges.
+        - name: account_security
+          description: >
+            Customer suspects fraud, reports unrecognised logins, is locked out
+            due to security triggers, or needs identity verification.
+            The distinguishing signal is a perceived threat to account integrity,
+            not just a forgotten password or routine login problem.
+        - name: product_bug
+          description: >
+            Customer reports app crashing, a feature not functioning, an error
+            message appearing unexpectedly, or behaviour inconsistent with what
+            the product should do. No money is missing — this is a software issue.
+            Includes UI glitches, broken flows, and integration failures.
+        - name: billing_inquiry
+          description: >
+            Customer has a question about fees, subscription tiers, invoice
+            details, or pricing — but is NOT disputing a specific charge.
+            They want information or clarification, not a refund.
+            Includes questions about upcoming charges, plan differences, and tax.
+        - name: general_support
+          description: >
+            Anything that does not fit the above: how-to questions, feature
+            requests, account settings changes, onboarding help, or general
+            feedback. No money issue, no security concern, no clear software bug.
+
+    - name: urgency
+      type: enum
+      description: How time-sensitive is this ticket based on its content?
+      values:
+        - name: high
+          description: Suspected fraud, locked account, or missing funds — same-day response needed.
+        - name: medium
+          description: Functional issue affecting usage but no immediate financial or security risk.
+        - name: low
+          description: Informational question or minor inconvenience with no active harm.
+
+    - name: metadata
+      type: object
+      description: Structured signals extracted from the ticket text
+      fields:
+        - name: channel
+          type: enum
+          values:
+            - name: mobile_app
+            - name: web_portal
+            - name: email
+        - name: mentions_amount
+          type: boolean
+          description: True if the ticket references a specific dollar or currency amount
+        - name: is_boundary_case
+          type: boolean
+          description: >
+            True if this ticket could plausibly be routed to more than one category.
+            Boundary cases are valuable training signal — do not suppress them.
+
+seeds:
+  - text: "I transferred $250 to my friend yesterday and it still hasn't arrived. The transaction shows completed on my end but she says she never received it."
+    label: payment_dispute
+    urgency: high
+    metadata:
+      channel: mobile_app
+      mentions_amount: true
+      is_boundary_case: false
+
+  - text: "There was a login to my account from somewhere in Eastern Europe and I definitely didn't do it. I've changed my password but I'm worried about my linked bank card."
+    label: account_security
+    urgency: high
+    metadata:
+      channel: web_portal
+      mentions_amount: false
+      is_boundary_case: false
+
+  - text: "Every time I try to add a new payee the app freezes and I have to force-quit it. Tried reinstalling twice — same problem."
+    label: product_bug
+    urgency: medium
+    metadata:
+      channel: mobile_app
+      mentions_amount: false
+      is_boundary_case: false
+
+  - text: "Can you explain why I was charged the $9.99 fee this month? I thought I was still on the free plan."
+    label: billing_inquiry
+    urgency: low
+    metadata:
+      channel: email
+      mentions_amount: true
+      is_boundary_case: false
+
+  - text: "How do I set up recurring payments for my monthly invoices? I've looked through the settings but can't find the option."
+    label: general_support
+    urgency: low
+    metadata:
+      channel: web_portal
+      mentions_amount: false
+      is_boundary_case: false
+
+anti_seeds:
+  - text: "Hi team, just a reminder the Q3 payroll run is scheduled for Friday."
+    reason: Internal employee message, not a customer ticket.
+  - text: "ALERT: Suspicious login attempt detected for account ID 48291."
+    reason: Automated system notification, not a human customer writing in.
+  - text: "We're considering switching our company to your platform — can we book a demo?"
+    reason: Sales inquiry from a non-customer, not a support ticket from an existing user.
+  - text: "My payment failed and I'm very angry about your terrible service!!!"
+    reason: No specific information — too vague to be a useful training example.
+
+provider:
+  type: bedrock
+  concurrency: 8
+  timeout_seconds: 120
+
+dedup:
+  threshold: 0.82
+
+judge:
+  enabled: true
+  min_correctness: 7
+  min_realism: 8
+  min_distinctiveness: 6
+
+logic_filter:
+  enabled: true
+  batch_size: 25

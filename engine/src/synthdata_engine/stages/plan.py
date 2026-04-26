@@ -18,6 +18,63 @@ from ..debug import DebugWriter
 from .logic_filter import Combination
 
 SWEET_MIN = 5
+
+
+def _stratified_sample(
+    combinations: list[Combination],
+    balanced_by: list[str],
+    keep: int,
+    rng: random.Random,
+) -> list[Combination]:
+    """Sample `keep` combinations with balanced representation across all balanced fields.
+
+    Uses a greedy coverage pass: iterates round-robin over all balanced fields and
+    picks the combination that covers the most under-represented values first.
+    This ensures no single field value dominates the resulting plan.
+    """
+    if not combinations or keep <= 0:
+        return []
+
+    pool = list(combinations)
+    rng.shuffle(pool)
+
+    # Track how many times each (field, value) pair has been covered.
+    coverage: dict[tuple[str, str], int] = {}
+    for f in balanced_by:
+        vals = {c.get(f) for c in pool if c.get(f) is not None}
+        for v in vals:
+            coverage[(f, v)] = 0
+
+    result: list[Combination] = []
+    used = set()
+
+    while len(result) < keep and pool:
+        # Score each candidate: sum of (1/coverage+1) for each balanced field value it covers.
+        # Prefer candidates that cover under-represented values.
+        best_score = -1.0
+        best_idx = 0
+        for idx, combo in enumerate(pool):
+            if id(combo) in used:
+                continue
+            score = sum(
+                1.0 / (coverage.get((f, combo.get(f)), 0) + 1)
+                for f in balanced_by
+                if combo.get(f) is not None
+            )
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+
+        chosen = pool.pop(best_idx)
+        result.append(chosen)
+        used.add(id(chosen))
+        for f in balanced_by:
+            key = (f, chosen.get(f))
+            if key in coverage:
+                coverage[key] += 1
+
+    rng.shuffle(result)
+    return result
 SWEET_MAX = 20          # ideal upper bound for small datasets; scaled up dynamically
 MAX_PER_COMBO = 5_000   # hard sanity cap — dedup/judge handle diversity above this
 
@@ -54,6 +111,7 @@ def build_plan(
     combinations: list[Combination],
     target_count: int,
     *,
+    balanced_by: list[str] | None = None,
     overshoot: float = 1.1,
     rng: random.Random | None = None,
     debug: DebugWriter | None = None,
@@ -83,7 +141,12 @@ def build_plan(
     # Too many combinations for a small target — sample down so per >= SWEET_MIN.
     if per < SWEET_MIN and n > adjusted_target // SWEET_MIN:
         keep = max(1, adjusted_target // SWEET_MIN)
-        combinations = rng.sample(combinations, keep)
+        if balanced_by:
+            # Stratified sample: distribute slots equally across balanced field
+            # values so no class is starved in the allocation plan.
+            combinations = _stratified_sample(combinations, balanced_by, keep, rng)
+        else:
+            combinations = rng.sample(combinations, keep)
         n = len(combinations)
         per = max(1, adjusted_target // n)
 

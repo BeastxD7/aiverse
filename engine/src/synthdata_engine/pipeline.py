@@ -21,7 +21,7 @@ from .stages.discover import discover_axes
 from .stages.generate import GenStats, flatten_samples, generate_all
 from .stages.judge import JudgeStats, judge_samples
 from .stages.logic_filter import Combination, cartesian, filter_combinations
-from .stages.plan import AllocationPlan, build_plan
+from .stages.plan import AllocationPlan, PlanRow, build_plan, SWEET_MIN
 
 
 @dataclass
@@ -164,7 +164,29 @@ async def run_job(
 
     # ── Stage 2 — plan ──────────────────────────────────────────────────────
     await _call(on_stage, "stage2_plan", {"status": "running"})
-    plan = build_plan(valid, cfg.dataset.target_count, debug=dbg)
+    balanced_fields = (
+        [f.name for f in cfg.dataset_schema.fields if f.type == "enum" and f.values]
+        if cfg.dataset.require_balanced else None
+    )
+    plan = build_plan(valid, cfg.dataset.target_count, balanced_by=balanced_fields, debug=dbg)
+
+    # Guarantee balanced coverage: if any required enum value has no plan row,
+    # add a minimal fallback row (only the required field pinned) so the model
+    # generates naturally-matching text without axis conflicts that trip the judge.
+    # Use 3× SWEET_MIN to absorb judge losses on these small targeted batches.
+    if cfg.dataset.require_balanced:
+        from uuid import uuid4 as _uuid4
+        for f in cfg.dataset_schema.fields:
+            if f.type != "enum" or not f.values:
+                continue
+            covered = {r.combination.get(f.name) for r in plan.rows}
+            for ev in f.values:
+                if ev.name not in covered:
+                    plan.rows.append(PlanRow(
+                        combination_id=_uuid4().hex[:12],
+                        combination={f.name: ev.name},
+                        target=SWEET_MIN * 3,
+                    ))
 
     if plan.undershoot_risk:
         gap = cfg.dataset.target_count - plan.total_target

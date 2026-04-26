@@ -136,6 +136,14 @@ async def generate_all(
                     return
                 resp = resp2
 
+            # Combination is ground truth for schema fields it pins.
+            # Override any mislabeled values so required-balanced classes
+            # are never suppressed by LLM label drift.
+            schema_field_names = {f.name for f in schema.fields}
+            for key, pinned_val in row.combination.items():
+                if key in schema_field_names and key in resp.parsed:
+                    resp.parsed[key] = pinned_val
+
             row.samples.append(resp.parsed)
             row.produced += 1
             stats.succeeded += 1
