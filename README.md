@@ -49,25 +49,12 @@ uv run synthdata configs/emotion_detection_bedrock.yaml --dry-run
 uv run synthdata configs/emotion_detection_bedrock.yaml --target 500
 ```
 
-### AWS Bedrock Setup
+### Providers
 
-Add credentials to a `.env` file at this repo root:
-
-```env
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_REGION=us-east-1
-AWS_MODEL_ID=google.gemma-3-27b-it-qat-q8-0:2:2
-```
-
-### Local Ollama Setup
-
-```bash
-brew install ollama
-ollama pull gemma4:e4b
-ollama serve
-uv run synthdata configs/hr_intent.yaml
-```
+| Provider | Best for | Setup guide |
+|---|---|---|
+| [AWS Bedrock](docs/providers/bedrock.md) | Quality runs, large targets, production | [docs/providers/bedrock.md](docs/providers/bedrock.md) |
+| [Ollama](docs/providers/ollama.md) | Offline / local / no API key | [docs/providers/ollama.md](docs/providers/ollama.md) |
 
 ### Minimal Config
 
@@ -114,7 +101,8 @@ provider:
 | Ollama (M-series Mac) | gemma4:e4b | ~22 min | ~90 min | ~3 hrs |
 
 **Full documentation:** [`engine/README.md`](engine/README.md)  
-**Architecture deep-dive:** [`engine/docs/explanation.md`](engine/docs/explanation.md)
+**Architecture deep-dive:** [`docs/explanation.md`](docs/explanation.md)  
+**Provider guides:** [Bedrock](docs/providers/bedrock.md) · [Ollama](docs/providers/ollama.md)
 
 ---
 

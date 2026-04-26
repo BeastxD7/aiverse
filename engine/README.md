@@ -426,7 +426,7 @@ The full nested structure is serialised into the generation prompt so the LLM kn
 
 **`logic_filter.enabled`** — Filters out implausible axis combinations before generation. Recommended for Bedrock; disable for Ollama.
 
-Full config documentation: [`docs/implementation/config-reference.md`](docs/implementation/config-reference.md)
+Full config documentation: [`../docs/implementation/config-reference.md`](../docs/implementation/config-reference.md)
 
 ---
 
