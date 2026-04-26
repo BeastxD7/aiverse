@@ -1,1 +1,36 @@
+# Secrets
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# SynthData run artifacts
+engine/out_*.jsonl
+engine/out_*.json
+engine/out_*.csv
+engine/debug/
+engine/checkpoints/
+
+# macOS
+.DS_Store
