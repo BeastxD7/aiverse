@@ -8,7 +8,7 @@ A collection of AI-powered tools for building, testing, and shipping intelligent
 
 | Module | Description | Status |
 |---|---|---|
-| [`engine/`](engine/) | SynthData Engine — generate labeled NLP training datasets from a YAML config | v0.1.0 |
+| [`engine/`](engine/) | SynthData Engine — generate labeled NLP training datasets from a YAML config | v0.2.0 |
 
 ---
 

@@ -44,8 +44,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ```bash
 # Clone the repo
-git clone <repo-url>
-cd aiverse/engine
+git clone https://github.com/BeastxD7/synthdata.git
+cd synthdata/engine
 
 # Install dependencies
 uv sync
