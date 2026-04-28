@@ -32,5 +32,9 @@ engine/out_*.csv
 engine/debug/
 engine/checkpoints/
 
+# Backend
+backend/outputs/*
+!backend/outputs/.gitkeep
+
 # macOS
 .DS_Store
