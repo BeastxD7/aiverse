@@ -15,7 +15,11 @@ dependencies = [
     "bcrypt>=4.0.0",
     "cryptography>=44.0.0",
     "python-dotenv>=1.2.0",
+    "synthdata-engine",
 ]
+
+[tool.uv.sources]
+synthdata-engine = { path = "../engine", editable = true }
 
 [dependency-groups]
 dev = [

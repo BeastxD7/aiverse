@@ -1,13 +1,7 @@
-"""Job lifecycle management + SSE broadcasting.
-
-Engine integration note:
-  The engine lives at ../engine/src/synthdata_engine.
-  To call it directly: `from synthdata_engine.pipeline import run_job`
-  For now we stub the runner — wire the real engine call once the
-  virtual environment is set up to include both packages.
-"""
+"""Job lifecycle management + SSE broadcasting."""
 
 import asyncio
+import csv
 import json
 import uuid
 from datetime import datetime, timezone
@@ -19,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import settings
 from ..models.job import Job, JobEvent, JobStatus
 from ..models.user import User
-from ..utils.errors import BadRequestError, ForbiddenError, NotFoundError
+from ..utils.errors import BadRequestError, NotFoundError
 from .credit_service import CreditService
 
 
@@ -160,32 +154,42 @@ class JobService:
                 seq += 1
 
             try:
-                # --- Engine integration point ---
-                # Uncomment once synthdata_engine is importable in this venv:
-                #
-                # from synthdata_engine.config import JobConfig
-                # from synthdata_engine.pipeline import run_job
-                #
-                # cfg = JobConfig.model_validate(config)
-                #
-                # async def on_stage(stage: str, payload: dict) -> None:
-                #     await emit("stage", stage, payload)
-                #
-                # def on_progress(event: dict) -> None:
-                #     asyncio.create_task(emit("progress", "generate", event))
-                #
-                # engine_result = await run_job(cfg, on_stage=on_stage, on_progress=on_progress)
-                #
-                # output_dir = Path(settings.OUTPUTS_DIR) / str(job_id)
-                # output_dir.mkdir(parents=True, exist_ok=True)
-                # output_path = str(output_dir / f"output.{output_format}")
-                # _write_output(engine_result.samples, output_path, output_format)
-                #
-                # output_row_count = len(engine_result.samples)
+                from synthdata_engine.config import JobConfig
+                from synthdata_engine.pipeline import run_job
 
-                # Placeholder until engine is wired:
-                await emit("stage", "start", {"status": "running", "note": "engine not yet wired"})
-                raise NotImplementedError("Engine not yet wired — see job_service.py comment block")
+                cfg = JobConfig.model_validate(config)
+
+                async def on_stage(stage: str, payload: dict) -> None:
+                    await emit("stage", stage, payload)
+
+                async def on_progress(event: dict) -> None:
+                    await emit("progress", "generate", event)
+
+                engine_result = await run_job(cfg, on_stage=on_stage, on_progress=on_progress)
+
+                output_dir = Path(settings.OUTPUTS_DIR) / str(job_id)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = str(output_dir / f"output.{output_format}")
+                _write_output(engine_result.samples, output_path, output_format)
+
+                output_row_count = len(engine_result.samples)
+
+                job.status = JobStatus.completed
+                job.output_path = output_path
+                job.output_row_count = output_row_count
+                job.completed_at = datetime.now(timezone.utc)
+                job.elapsed_seconds = engine_result.elapsed_seconds
+
+                credit_svc = CreditService(db)
+                await credit_svc.finalize(user, job.credits_reserved, output_row_count, job_id)
+
+                await db.commit()
+                await runner.broadcast(job_id, {"type": "done", "stage": "done", "payload": {
+                    "samples": output_row_count,
+                    "elapsed": engine_result.elapsed_seconds,
+                }})
+                await runner.broadcast(job_id, None)
+                return
 
             except asyncio.CancelledError:
                 job.status = JobStatus.cancelled
@@ -205,5 +209,21 @@ class JobService:
                 await db.commit()
                 await runner.broadcast(job_id, {"type": "error", "stage": "error", "payload": {"message": str(exc)}})
 
-            # Sentinel: tells SSE generator the stream is done
+            # Sentinel: tells SSE generator the stream is done (error/cancel paths)
             await runner.broadcast(job_id, None)
+
+
+def _write_output(samples: list[dict], path: str, fmt: str) -> None:
+    p = Path(path)
+    if fmt == "jsonl":
+        p.write_text("\n".join(json.dumps(s, ensure_ascii=False) for s in samples), encoding="utf-8")
+    elif fmt == "json":
+        p.write_text(json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8")
+    elif fmt == "csv":
+        if not samples:
+            p.write_text("", encoding="utf-8")
+            return
+        with p.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(samples[0].keys()))
+            writer.writeheader()
+            writer.writerows(samples)
