@@ -26,7 +26,7 @@ async def create_job(
     db: AsyncSession = Depends(get_db),
 ):
     svc = JobService(db)
-    job = await svc.create(current_user, body.name, body.output_format, body.config)
+    job = await svc.create(current_user, body.name, body.output_format, body.config.model_dump(by_alias=True))
     await svc.enqueue(job, current_user)
     return api_success(data=JobOut.model_validate(job), message="Job created and queued")
 

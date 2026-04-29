@@ -64,8 +64,9 @@ async def test_create_job_missing_target_count(client: AsyncClient, user_headers
         json={"name": "No target", "config": bad_config},
         headers=user_headers,
     )
-    assert resp.status_code == 400
-    assert resp.json()["error"]["code"] == "BAD_REQUEST"
+    # target_count is required — Pydantic catches this at validation layer
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 async def test_create_job_unauthenticated(client: AsyncClient):
