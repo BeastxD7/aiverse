@@ -2,24 +2,23 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from cryptography.fernet import Fernet
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from .config import settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _fernet = Fernet(settings.ENCRYPTION_KEY.encode())
 
 
 # --- Passwords ---
 
 def hash_password(password: str) -> str:
-    return _pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 # --- JWT ---

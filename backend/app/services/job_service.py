@@ -104,7 +104,7 @@ class JobService:
             raise NotFoundError("Job")
         return job
 
-    async def list(self, user_id: uuid.UUID, limit: int, offset: int) -> tuple[list[Job], int]:
+    async def list_jobs(self, user_id: uuid.UUID, limit: int, offset: int) -> tuple[list[Job], int]:
         q = select(Job).where(Job.user_id == user_id).order_by(Job.created_at.desc())
         count_q = select(func.count()).select_from(Job).where(Job.user_id == user_id)
 

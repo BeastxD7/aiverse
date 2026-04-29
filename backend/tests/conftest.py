@@ -1,20 +1,29 @@
 """Shared fixtures for all test modules."""
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import get_db
-from app.core.security import hash_password
 from app.main import app
 from app.models import Base
 from app.models.user import User, UserRole
+from app.services.credit_service import CreditService
 
-TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/synthdata_test"
+TEST_DATABASE_URL = "postgresql+asyncpg://shashank@localhost:5432/synthdata_test"
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+# All transactional tables in one TRUNCATE so PostgreSQL handles FK cycles.
+# credit_settings is included so updated_by doesn't block truncating users;
+# it is reseeded immediately after each reset.
+_TRUNCATE_SQL = (
+    "TRUNCATE TABLE "
+    "job_events, jobs, credit_transactions, refresh_tokens, credit_settings, users "
+    "RESTART IDENTITY"
+)
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
@@ -22,16 +31,27 @@ async def setup_db():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+    async with TestSessionLocal() as session:
+        await CreditService(session).seed_defaults()
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def reset_tables(setup_db):
+    """Truncate all tables after every test, then reseed credit_settings."""
+    yield
+    async with test_engine.begin() as conn:
+        await conn.execute(text(_TRUNCATE_SQL))
+    async with TestSessionLocal() as session:
+        await CreditService(session).seed_defaults()
 
 
 @pytest_asyncio.fixture
 async def db():
     async with TestSessionLocal() as session:
         yield session
-        await session.rollback()
 
 
 @pytest_asyncio.fixture
@@ -74,10 +94,9 @@ async def user_headers(client: AsyncClient, user: dict) -> dict:
 @pytest_asyncio.fixture
 async def admin_user(client: AsyncClient, db: AsyncSession) -> dict:
     """Creates a user then promotes them to admin via DB."""
+    from sqlalchemy import select
     data = await register(client, "admin@test.com", name="Admin User")
-    result = await db.execute(
-        __import__("sqlalchemy", fromlist=["select"]).select(User).where(User.email == "admin@test.com")
-    )
+    result = await db.execute(select(User).where(User.email == "admin@test.com"))
     u = result.scalar_one()
     u.role = UserRole.admin
     await db.commit()

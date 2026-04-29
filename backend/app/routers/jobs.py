@@ -38,7 +38,7 @@ async def list_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     svc = JobService(db)
-    jobs, total = await svc.list(current_user.id, params.limit, params.offset)
+    jobs, total = await svc.list_jobs(current_user.id, params.limit, params.offset)
     data = PaginatedData.build([JobListOut.model_validate(j) for j in jobs], total, params)
     return api_success(data=data)
 
