@@ -4,6 +4,7 @@ import pytest
 from httpx import AsyncClient
 
 from tests.conftest import register
+from tests.helpers import assert_credit_setting, assert_error, assert_success
 
 pytestmark = pytest.mark.asyncio
 
@@ -12,7 +13,11 @@ async def test_list_credit_settings_as_admin(client: AsyncClient, admin_headers:
     resp = await client.get("/api/v1/admin/credit-settings", headers=admin_headers)
     assert resp.status_code == 200
     body = resp.json()
-    assert body["success"] is True
+    assert_success(body)
+    assert isinstance(body["data"], list)
+    assert len(body["data"]) == 3
+    for setting in body["data"]:
+        assert_credit_setting(setting)
     keys = [s["key"] for s in body["data"]]
     assert "credits_per_sample" in keys
     assert "free_credits_on_signup" in keys
@@ -22,12 +27,13 @@ async def test_list_credit_settings_as_admin(client: AsyncClient, admin_headers:
 async def test_list_credit_settings_as_user_forbidden(client: AsyncClient, user_headers: dict):
     resp = await client.get("/api/v1/admin/credit-settings", headers=user_headers)
     assert resp.status_code == 403
-    assert resp.json()["error"]["code"] == "FORBIDDEN"
+    assert_error(resp.json(), "FORBIDDEN")
 
 
 async def test_list_credit_settings_unauthenticated(client: AsyncClient):
     resp = await client.get("/api/v1/admin/credit-settings")
     assert resp.status_code == 401
+    assert_error(resp.json(), "UNAUTHORIZED")
 
 
 async def test_update_credit_setting(client: AsyncClient, admin_headers: dict):
@@ -38,7 +44,8 @@ async def test_update_credit_setting(client: AsyncClient, admin_headers: dict):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["success"] is True
+    assert_success(body)
+    assert_credit_setting(body["data"])
     assert body["data"]["key"] == "credits_per_sample"
     assert body["data"]["value"] == "2"
 
@@ -76,6 +83,7 @@ async def test_update_nonexistent_setting(client: AsyncClient, admin_headers: di
         headers=admin_headers,
     )
     assert resp.status_code == 404
+    assert_error(resp.json(), "NOT_FOUND")
 
 
 async def test_update_setting_as_user_forbidden(client: AsyncClient, user_headers: dict):
@@ -85,6 +93,7 @@ async def test_update_setting_as_user_forbidden(client: AsyncClient, user_header
         headers=user_headers,
     )
     assert resp.status_code == 403
+    assert_error(resp.json(), "FORBIDDEN")
 
 
 async def test_update_setting_empty_value(client: AsyncClient, admin_headers: dict):
@@ -94,3 +103,4 @@ async def test_update_setting_empty_value(client: AsyncClient, admin_headers: di
         headers=admin_headers,
     )
     assert resp.status_code == 422
+    assert_error(resp.json(), "VALIDATION_ERROR")
